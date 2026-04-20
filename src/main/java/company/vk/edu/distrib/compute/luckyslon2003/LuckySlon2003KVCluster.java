@@ -10,14 +10,15 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class LuckySlon2003KVCluster implements KVCluster {
     private static final Logger log = LoggerFactory.getLogger(LuckySlon2003KVCluster.class);
 
-    private final List<Integer> ports;
     private final List<String> endpoints;
     private final Path baseDirectory;
     private final ShardingAlgorithm shardingAlgorithm;
+    private final ReentrantLock lifecycleLock = new ReentrantLock();
     private final Map<String, LuckySlon2003KVService> activeNodes = new ConcurrentHashMap<>();
 
     public LuckySlon2003KVCluster(
@@ -25,8 +26,7 @@ public class LuckySlon2003KVCluster implements KVCluster {
             Path baseDirectory,
             ShardingAlgorithm shardingAlgorithm
     ) {
-        this.ports = List.copyOf(ports);
-        this.endpoints = this.ports.stream()
+        this.endpoints = List.copyOf(ports).stream()
                 .map(port -> "http://localhost:" + port)
                 .toList();
         this.baseDirectory = baseDirectory;
@@ -34,14 +34,28 @@ public class LuckySlon2003KVCluster implements KVCluster {
     }
 
     @Override
-    public synchronized void start() {
-        for (String endpoint : endpoints) {
-            start(endpoint);
+    public void start() {
+        lifecycleLock.lock();
+        try {
+            for (String endpoint : endpoints) {
+                startNode(endpoint);
+            }
+        } finally {
+            lifecycleLock.unlock();
         }
     }
 
     @Override
-    public synchronized void start(String endpoint) {
+    public void start(String endpoint) {
+        lifecycleLock.lock();
+        try {
+            startNode(endpoint);
+        } finally {
+            lifecycleLock.unlock();
+        }
+    }
+
+    private void startNode(String endpoint) {
         if (activeNodes.containsKey(endpoint)) {
             return;
         }
@@ -61,14 +75,28 @@ public class LuckySlon2003KVCluster implements KVCluster {
     }
 
     @Override
-    public synchronized void stop() {
-        for (String endpoint : List.copyOf(activeNodes.keySet())) {
-            stop(endpoint);
+    public void stop() {
+        lifecycleLock.lock();
+        try {
+            for (String endpoint : List.copyOf(activeNodes.keySet())) {
+                stopNode(endpoint);
+            }
+        } finally {
+            lifecycleLock.unlock();
         }
     }
 
     @Override
-    public synchronized void stop(String endpoint) {
+    public void stop(String endpoint) {
+        lifecycleLock.lock();
+        try {
+            stopNode(endpoint);
+        } finally {
+            lifecycleLock.unlock();
+        }
+    }
+
+    private void stopNode(String endpoint) {
         LuckySlon2003KVService service = activeNodes.remove(endpoint);
         if (service == null) {
             return;
