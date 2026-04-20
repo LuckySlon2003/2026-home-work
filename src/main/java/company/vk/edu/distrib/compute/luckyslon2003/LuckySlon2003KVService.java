@@ -11,6 +11,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.concurrent.Executors;
@@ -21,12 +26,31 @@ public class LuckySlon2003KVService implements KVService {
 
     private static final String PATH_STATUS = "/v0/status";
     private static final String PATH_ENTITY = "/v0/entity";
+    private static final String PROXY_HEADER = "X-LuckySlon2003-Proxy";
+    private static final Duration PROXY_TIMEOUT = Duration.ofSeconds(2);
 
     private final HttpServer server;
     private final Dao<byte[]> dao;
+    private final String localEndpoint;
+    private final ShardingAlgorithm shardingAlgorithm;
+    private final HttpClient httpClient;
 
     public LuckySlon2003KVService(int port, Dao<byte[]> dao) throws IOException {
+        this(port, dao, null, null);
+    }
+
+    public LuckySlon2003KVService(
+            int port,
+            Dao<byte[]> dao,
+            String localEndpoint,
+            ShardingAlgorithm shardingAlgorithm
+    ) throws IOException {
         this.dao = dao;
+        this.localEndpoint = localEndpoint;
+        this.shardingAlgorithm = shardingAlgorithm;
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(PROXY_TIMEOUT)
+                .build();
         this.server = HttpServer.create(new InetSocketAddress(port), 0);
         this.server.setExecutor(Executors.newCachedThreadPool());
         this.server.createContext(PATH_STATUS, this::handleStatus);
@@ -67,15 +91,35 @@ public class LuckySlon2003KVService implements KVService {
             return;
         }
 
+        if (isClusterRequest() && !isInternalProxyRequest(exchange)) {
+            handleClusterEntity(exchange, id);
+            return;
+        }
+
         switch (exchange.getRequestMethod().toUpperCase(java.util.Locale.ROOT)) {
-            case "GET" -> handleGet(exchange, id);
-            case "PUT" -> handlePut(exchange, id);
-            case "DELETE" -> handleDelete(exchange, id);
+            case "GET" -> handleLocalGet(exchange, id);
+            case "PUT" -> handleLocalPut(exchange, id);
+            case "DELETE" -> handleLocalDelete(exchange, id);
             default -> sendEmpty(exchange, 405);
         }
     }
 
-    private void handleGet(HttpExchange exchange, String id) throws IOException {
+    private void handleClusterEntity(HttpExchange exchange, String id) throws IOException {
+        String owner = shardingAlgorithm.primaryOwner(id);
+        if (localEndpoint.equals(owner)) {
+            switch (exchange.getRequestMethod().toUpperCase(java.util.Locale.ROOT)) {
+                case "GET" -> handleLocalGet(exchange, id);
+                case "PUT" -> handleLocalPut(exchange, id);
+                case "DELETE" -> handleLocalDelete(exchange, id);
+                default -> sendEmpty(exchange, 405);
+            }
+            return;
+        }
+
+        proxyRequest(exchange, owner);
+    }
+
+    private void handleLocalGet(HttpExchange exchange, String id) throws IOException {
         try {
             byte[] data = dao.get(id);
             exchange.sendResponseHeaders(200, data.length);
@@ -92,7 +136,7 @@ public class LuckySlon2003KVService implements KVService {
         }
     }
 
-    private void handlePut(HttpExchange exchange, String id) throws IOException {
+    private void handleLocalPut(HttpExchange exchange, String id) throws IOException {
         try (InputStream body = exchange.getRequestBody()) {
             byte[] data = body.readAllBytes();
             dao.upsert(id, data);
@@ -105,7 +149,7 @@ public class LuckySlon2003KVService implements KVService {
         }
     }
 
-    private void handleDelete(HttpExchange exchange, String id) throws IOException {
+    private void handleLocalDelete(HttpExchange exchange, String id) throws IOException {
         try {
             dao.delete(id);
             sendEmpty(exchange, 202);
@@ -117,9 +161,62 @@ public class LuckySlon2003KVService implements KVService {
         }
     }
 
+    private void proxyRequest(HttpExchange exchange, String owner) throws IOException {
+        byte[] requestBody;
+        try (InputStream body = exchange.getRequestBody()) {
+            requestBody = body.readAllBytes();
+        }
+
+        HttpRequest.BodyPublisher bodyPublisher = requestBody.length == 0
+                ? HttpRequest.BodyPublishers.noBody()
+                : HttpRequest.BodyPublishers.ofByteArray(requestBody);
+
+        URI proxyUri;
+        try {
+            proxyUri = new URI(owner + exchange.getRequestURI().toString());
+        } catch (URISyntaxException e) {
+            log.error("Failed to build proxy URI for owner={}", owner, e);
+            sendEmpty(exchange, 500);
+            return;
+        }
+
+        HttpRequest proxyRequest = HttpRequest.newBuilder(proxyUri)
+                .timeout(PROXY_TIMEOUT)
+                .header(PROXY_HEADER, "true")
+                .method(exchange.getRequestMethod(), bodyPublisher)
+                .build();
+
+        try {
+            HttpResponse<byte[]> response = httpClient.send(proxyRequest, HttpResponse.BodyHandlers.ofByteArray());
+            sendResponse(exchange, response.statusCode(), response.body());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            sendEmpty(exchange, 503);
+        } catch (IOException e) {
+            log.error("Proxy request failed for owner={}", owner, e);
+            sendEmpty(exchange, 503);
+        }
+    }
+
     private static void sendEmpty(HttpExchange exchange, int status) throws IOException {
         exchange.sendResponseHeaders(status, -1);
         exchange.close();
+    }
+
+    private static void sendResponse(HttpExchange exchange, int status, byte[] body) throws IOException {
+        byte[] responseBody = body == null ? new byte[0] : body;
+        exchange.sendResponseHeaders(status, responseBody.length);
+        try (var out = exchange.getResponseBody()) {
+            out.write(responseBody);
+        }
+    }
+
+    private boolean isClusterRequest() {
+        return localEndpoint != null && shardingAlgorithm != null;
+    }
+
+    private static boolean isInternalProxyRequest(HttpExchange exchange) {
+        return exchange.getRequestHeaders().containsKey(PROXY_HEADER);
     }
 
     private static String queryParam(URI uri, String name) {
