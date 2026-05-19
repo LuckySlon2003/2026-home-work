@@ -59,7 +59,9 @@ public class LuckySlon2003AuditableKVService implements AuditableKVService {
     @Override
     public void start() {
         server.start();
-        LOG.info("LuckySlon2003AuditableKVService started on port {}", server.getAddress().getPort());
+        if (LOG.isInfoEnabled()) {
+            LOG.info("LuckySlon2003AuditableKVService started on port {}", server.getAddress().getPort());
+        }
     }
 
     @Override

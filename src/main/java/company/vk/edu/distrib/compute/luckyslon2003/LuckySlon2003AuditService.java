@@ -22,6 +22,7 @@ public class LuckySlon2003AuditService implements AuditService {
 
     private static final Logger LOG = LoggerFactory.getLogger(LuckySlon2003AuditService.class);
     private static final String AUDIT_TOPIC = "audit";
+    private static final int AUDIT_EVENT_PARTS = 3;
 
     private final String bootstrapServers;
     private final String consumerGroupId;
@@ -100,8 +101,8 @@ public class LuckySlon2003AuditService implements AuditService {
         if (value == null) {
             return null;
         }
-        String[] parts = value.split("\\|", 3);
-        if (parts.length < 3) {
+        String[] parts = value.split("\\|", AUDIT_EVENT_PARTS);
+        if (parts.length < AUDIT_EVENT_PARTS) {
             LOG.warn("Invalid audit event format: {}", value);
             return null;
         }
