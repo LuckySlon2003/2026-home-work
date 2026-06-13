@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "company.vk.edu.distrib.compute.luckyslon2003.proto";
+option java_outer_classname = "ReplicaProto";
+
+package luckyslon2003;
+
+// Внутренний транспорт кластера. Координатор (HTTP-фронт) общается с нодами-репликами
+// исключительно через этот gRPC-сервис. Внешний клиент про gRPC ничего не знает.
+service ReplicaService {
+  // Прочитать запись с реплики (вместе с версией и признаком tombstone).
+  rpc Get (GetRequest) returns (GetResponse);
+
+  // Создать/перезаписать запись на реплике с заданной версией.
+  rpc Upsert (UpsertRequest) returns (WriteResponse);
+
+  // Поставить tombstone (удаление) на реплике с заданной версией.
+  rpc Delete (DeleteRequest) returns (WriteResponse);
+}
+
+message GetRequest {
+  string id = 1;
+}
+
+message GetResponse {
+  // true, если по ключу на реплике есть запись (значение или tombstone).
+  bool present = 1;
+  // монотонная версия записи, назначаемая координатором.
+  int64 version = 2;
+  // true, если запись -- надгробие (удалённый ключ).
+  bool tombstone = 3;
+  bytes value = 4;
+}
+
+message UpsertRequest {
+  string id = 1;
+  int64 version = 2;
+  bytes value = 3;
+}
+
+message DeleteRequest {
+  string id = 1;
+  int64 version = 2;
+}
+
+message WriteResponse {
+}
