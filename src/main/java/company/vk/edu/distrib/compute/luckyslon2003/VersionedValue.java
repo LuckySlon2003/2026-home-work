@@ -4,25 +4,25 @@ package company.vk.edu.distrib.compute.luckyslon2003;
 // репликам и читателю детерминированно выбирать самую свежую запись по ключу.
 final class VersionedValue {
 
-    private final long version;
-    private final boolean tombstone;
-    private final byte[] value;
+    private final long revision;
+    private final boolean deleted;
+    private final byte[] payload;
 
     VersionedValue(long version, boolean tombstone, byte[] value) {
-        this.version = version;
-        this.tombstone = tombstone;
-        this.value = value.clone();
+        this.revision = version;
+        this.deleted = tombstone;
+        this.payload = value.clone();
     }
 
     long version() {
-        return version;
+        return revision;
     }
 
     boolean tombstone() {
-        return tombstone;
+        return deleted;
     }
 
     byte[] value() {
-        return value.clone();
+        return payload.clone();
     }
 }

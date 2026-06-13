@@ -65,6 +65,18 @@ final class ReplicaCoordinator {
     }
 
     ReadOutcome read(String id, int ack) {
+        List<ReplicaProxy.ReadResult> responses = gatherReads(id);
+        if (responses.size() < ack) {
+            return ReadOutcome.unavailable();
+        }
+        ReplicaProxy.ReadResult latest = latestPresent(responses);
+        if (latest == null || latest.tombstone()) {
+            return ReadOutcome.absent();
+        }
+        return ReadOutcome.found(latest.value());
+    }
+
+    private List<ReplicaProxy.ReadResult> gatherReads(String id) {
         List<ReplicaProxy.ReadResult> responses = new ArrayList<>();
         for (ReplicaProxy proxy : proxies) {
             try {
@@ -73,19 +85,17 @@ final class ReplicaCoordinator {
                 log.debug("Replica unavailable on read id={}", id, e);
             }
         }
-        if (responses.size() < ack) {
-            return ReadOutcome.unavailable();
-        }
+        return responses;
+    }
+
+    private static ReplicaProxy.ReadResult latestPresent(List<ReplicaProxy.ReadResult> responses) {
         ReplicaProxy.ReadResult latest = null;
         for (ReplicaProxy.ReadResult result : responses) {
             if (result.present() && (latest == null || result.version() > latest.version())) {
                 latest = result;
             }
         }
-        if (latest == null || latest.tombstone()) {
-            return ReadOutcome.absent();
-        }
-        return ReadOutcome.found(latest.value());
+        return latest;
     }
 
     boolean write(String id, byte[] value, int ack) {
@@ -113,25 +123,25 @@ final class ReplicaCoordinator {
 
     static final class ReadOutcome {
 
-        private static final ReadOutcome UNAVAILABLE = new ReadOutcome(false, false, new byte[0]);
-        private static final ReadOutcome ABSENT = new ReadOutcome(true, false, new byte[0]);
+        private static final ReadOutcome OUTCOME_UNAVAILABLE = new ReadOutcome(false, false, new byte[0]);
+        private static final ReadOutcome OUTCOME_ABSENT = new ReadOutcome(true, false, new byte[0]);
 
-        private final boolean quorum;
-        private final boolean found;
-        private final byte[] value;
+        private final boolean hasQuorum;
+        private final boolean hasValue;
+        private final byte[] payload;
 
         private ReadOutcome(boolean quorum, boolean found, byte[] value) {
-            this.quorum = quorum;
-            this.found = found;
-            this.value = value.clone();
+            this.hasQuorum = quorum;
+            this.hasValue = found;
+            this.payload = value.clone();
         }
 
         static ReadOutcome unavailable() {
-            return UNAVAILABLE;
+            return OUTCOME_UNAVAILABLE;
         }
 
         static ReadOutcome absent() {
-            return ABSENT;
+            return OUTCOME_ABSENT;
         }
 
         static ReadOutcome found(byte[] value) {
@@ -139,15 +149,15 @@ final class ReplicaCoordinator {
         }
 
         boolean quorum() {
-            return quorum;
+            return hasQuorum;
         }
 
         boolean found() {
-            return found;
+            return hasValue;
         }
 
         byte[] value() {
-            return value.clone();
+            return payload.clone();
         }
     }
 }

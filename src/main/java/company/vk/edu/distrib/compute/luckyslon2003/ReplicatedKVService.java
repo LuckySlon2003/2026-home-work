@@ -26,14 +26,15 @@ public final class ReplicatedKVService implements ReplicatedService {
     private static final String PATH_STATS = "/stats";
     private static final String STATS_PREFIX = "/stats/replica/";
     private static final String ACCESS_SUFFIX = "/access";
+    private static final String METHOD_GET = "GET";
     private static final int DEFAULT_ACK = 1;
 
-    private final int port;
+    private final int httpPort;
     private final HttpServer server;
     private final ReplicaCoordinator coordinator;
 
     public ReplicatedKVService(int port, int replicas) throws IOException {
-        this.port = port;
+        this.httpPort = port;
         this.coordinator = new ReplicaCoordinator(replicas);
         this.server = HttpServer.create(new InetSocketAddress(port), 0);
         this.server.setExecutor(Executors.newCachedThreadPool());
@@ -50,8 +51,10 @@ public final class ReplicatedKVService implements ReplicatedService {
             throw new IllegalStateException("Failed to start replica nodes", e);
         }
         server.start();
-        LOG.info("ReplicatedKVService started on http port {} with {} gRPC replicas",
-                port, coordinator.numberOfReplicas());
+        if (LOG.isInfoEnabled()) {
+            LOG.info("ReplicatedKVService started on http port {} with {} gRPC replicas",
+                    httpPort, coordinator.numberOfReplicas());
+        }
     }
 
     @Override
@@ -63,7 +66,7 @@ public final class ReplicatedKVService implements ReplicatedService {
 
     @Override
     public int port() {
-        return port;
+        return httpPort;
     }
 
     @Override
@@ -82,7 +85,7 @@ public final class ReplicatedKVService implements ReplicatedService {
     }
 
     private void handleStatus(HttpExchange exchange) throws IOException {
-        if ("GET".equals(exchange.getRequestMethod())) {
+        if (METHOD_GET.equals(exchange.getRequestMethod())) {
             sendEmpty(exchange, 200);
         } else {
             sendEmpty(exchange, 405);
@@ -136,7 +139,7 @@ public final class ReplicatedKVService implements ReplicatedService {
     }
 
     private void handleStats(HttpExchange exchange) throws IOException {
-        if (!"GET".equals(exchange.getRequestMethod())) {
+        if (!METHOD_GET.equals(exchange.getRequestMethod())) {
             sendEmpty(exchange, 405);
             return;
         }

@@ -70,32 +70,32 @@ final class ReplicaProxy {
 
     static final class ReadResult {
 
-        private final boolean present;
-        private final long version;
-        private final boolean tombstone;
-        private final byte[] value;
+        private final boolean keyPresent;
+        private final long revision;
+        private final boolean deleted;
+        private final byte[] payload;
 
         ReadResult(boolean present, long version, boolean tombstone, byte[] value) {
-            this.present = present;
-            this.version = version;
-            this.tombstone = tombstone;
-            this.value = value.clone();
+            this.keyPresent = present;
+            this.revision = version;
+            this.deleted = tombstone;
+            this.payload = value.clone();
         }
 
         boolean present() {
-            return present;
+            return keyPresent;
         }
 
         long version() {
-            return version;
+            return revision;
         }
 
         boolean tombstone() {
-            return tombstone;
+            return deleted;
         }
 
         byte[] value() {
-            return value.clone();
+            return payload.clone();
         }
     }
 }
